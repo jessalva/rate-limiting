@@ -6,6 +6,7 @@ import (
 	"github.com/go-redis/redis"
 	"github.com/go-redsync/redsync/v4"
 	"github.com/go-redsync/redsync/v4/redis/goredis"
+	"log"
 	"time"
 )
 
@@ -34,14 +35,14 @@ func (r *redisBucket) DecrementKey(key string, entityType string) error {
 	currTokenCount, err := r.client.Get(redisKey).Int()
 	if err == redis.Nil {
 		currTokenCount = 2
-		fmt.Println("key does not exist")
+		log.Println("key does not exist")
 	} else if err != nil {
-		fmt.Println("Get failed", err)
+		log.Println("Get failed", err)
 		return err
 	} else if currTokenCount == 0 {
 		return errors.New("all tokens are consumed")
 	} else {
-		fmt.Println(fmt.Sprintf("Number of token for %s: %d", redisKey, currTokenCount))
+		log.Println(fmt.Sprintf("Number of token for %s: %d", redisKey, currTokenCount))
 	}
 
 	mutex := r.redSync.NewMutex(redisLockForKey)
@@ -52,7 +53,7 @@ func (r *redisBucket) DecrementKey(key string, entityType string) error {
 	defer func(mutex *redsync.Mutex) {
 		_, err := mutex.Unlock()
 		if err != nil {
-			fmt.Println("Unlocking failed", mutex.Name(), err)
+			log.Println("Unlocking failed", mutex.Name(), err)
 		}
 	}(mutex)
 

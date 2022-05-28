@@ -1,30 +1,60 @@
 package bucket
 
 import (
-	"container/list"
+	"context"
+	"errors"
+	"net/http"
 	"sync"
 )
 
 type LeakyBucket struct {
-	bucketLock      sync.Mutex
-	processingQueue list.List
-	bucketSize      int
+	workerPool chan HttpRequestWithResponse
 }
 
-// Push  the counter for the given key.
-func (c *LeakyBucket) Push(key string) {
-	c.bucketLock.Lock()
-	// Lock so only one goroutine at a time can access the map c.v.
-	c.processingQueue.PushFront(key)
-	c.bucketLock.Unlock()
+func (c *LeakyBucket) WorkerPool() chan HttpRequestWithResponse {
+	return c.workerPool
 }
 
-// Pop returns the current value of the counter for the given key.
-func (c *LeakyBucket) Pop(key string) interface{} {
-	c.bucketLock.Lock()
-	// Lock so only one goroutine at a time can access the map c.v.
-	defer c.bucketLock.Unlock()
-	frontElement := c.processingQueue.Front()
-	c.processingQueue.Remove(frontElement)
-	return frontElement.Value
+func NewLeakyBucket(workerPool chan HttpRequestWithResponse) *LeakyBucket {
+	return &LeakyBucket{workerPool: workerPool}
+}
+
+type HttpRequestWithResponse struct {
+	requestID      string
+	request        *http.Request
+	ctx            context.Context
+	responseWriter http.ResponseWriter
+	handler        http.Handler
+	wg             *sync.WaitGroup
+}
+
+func NewHttpRequestWithResponse(requestID string, request *http.Request, ctx context.Context,
+	responseWriter http.ResponseWriter,
+	handler http.Handler, wg *sync.WaitGroup) HttpRequestWithResponse {
+	return HttpRequestWithResponse{requestID: requestID,
+		request: request, ctx: ctx,
+		responseWriter: responseWriter,
+		handler:        handler, wg: wg}
+}
+
+// TryEnqueue  the counter for the given key.
+func (c *LeakyBucket) TryEnqueue(job HttpRequestWithResponse) error {
+
+	select {
+	case c.workerPool <- job:
+		return nil
+	default:
+		return errors.New("unable to post job to leaky bucket")
+	}
+
+}
+
+// TryDequeue 1
+func (c *LeakyBucket) TryDequeue() {
+
+	for job := range c.workerPool {
+		job.handler.ServeHTTP(job.responseWriter, job.request)
+		job.wg.Done()
+	}
+
 }
